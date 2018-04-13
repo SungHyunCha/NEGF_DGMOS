@@ -12,9 +12,9 @@ do_init = 0;
 
 if do_init == 1
     %% model parameters 
-    Vg_bias = 0.0; 
+    Vg_bias = 0.6; 
 %     Vgate  = 0.533744;
-    Vgate  = 0.5100;
+    Vgate  = 0.5050;
     Vsource = 0.6113137; 
     Vgs = Vgate + Vg_bias; 
     Vss = Vsource;
@@ -85,38 +85,38 @@ if do_init == 1
                         nn, pp, Dn, Dp, Dn0, Dp0, ...
                         x_idx, x_int, x_dlt, z_idx, z_int, z_dlt, ...
                         Nd, Vt, Vss, Vds, Vgs );
-                    
+        
     %% initial Poisson eq. 
     jbase = configueJbase(eps_r, boundary, x_idx, x_int, x_dlt, z_idx, z_int, z_dlt);
-
+% return;
     [phi, nn, pp ] = initPoisson2D( 100, jbase, ni, phi, boundary(:,:,1), doping, ...
                           x_dlt, x_int, z_dlt, z_int, eps0, Vt, q);
+    nn_new = nn; 
+    phi_new = phi;
     save('init.mat');
     return;
 else 
     load('init.mat');
 end
+bias = 0.5;
+nVds = 51;   
+Vds = linspace(0, bias, nVds);     % simulation target 
 % bias = 0.6;
-% nVds = 7;   
-% Vds = linspace(0, bias, nVds);     % simulation target 
-bias = 0.6;
-nVgs = 4;   
-Vgs = linspace(0, bias, nVgs);     % simulation target 
+% nVgs = 4;   
+% Vgs = linspace(0, bias, nVgs);     % simulation target 
 
-nn_new = nn;
-phi_new = phi;
-
-for i = 1:1
+for i = 1:nVds
     for j = 1:100
         phi_old = phi_new;
         % delta1, nodenum2, valley
         tic;
-%         n1 = 2*schOneValley(0.2e-3, 1001, 1, phi_new(:,z_idx{2}), Vds(i), z(z_idx{2}), x, x_int2, Egap, Vt, q); 
-%         n2 = 2*schOneValley(0.2e-3, 1001, 2, phi_new(:,z_idx{2}), Vds(i), z(z_idx{2}), x, x_int2, Egap, Vt, q); 
-%         n3 = 2*schOneValley(0.2e-3, 1001, 3, phi_new(:,z_idx{2}), Vds(i), z(z_idx{2}), x, x_int2, Egap, Vt, q); 
-        n1 = 2*schOneValley(0.2e-3, 1001, 1, phi_new(:,z_idx{2}), 0.0, z(z_idx{2}), x, x_int2, Egap, Vt, q); 
-        n2 = 2*schOneValley(0.2e-3, 1001, 2, phi_new(:,z_idx{2}), 0.0, z(z_idx{2}), x, x_int2, Egap, Vt, q); 
-        n3 = 2*schOneValley(0.2e-3, 1001, 3, phi_new(:,z_idx{2}), 0.0, z(z_idx{2}), x, x_int2, Egap, Vt, q); 
+        delta_E = 0.1e-3;
+        n1 = 2*schOneValley(delta_E, 1001, 1, phi_new(:,z_idx{2}), Vds(i), z(z_idx{2}), x, x_int2, Egap, Vt, q); 
+        n2 = 2*schOneValley(delta_E, 1001, 2, phi_new(:,z_idx{2}), Vds(i), z(z_idx{2}), x, x_int2, Egap, Vt, q); 
+        n3 = 2*schOneValley(delta_E, 1001, 3, phi_new(:,z_idx{2}), Vds(i), z(z_idx{2}), x, x_int2, Egap, Vt, q); 
+%         n1 = 2*schOneValley(delta_E, 1001, 1, phi_new(:,z_idx{2}), 0.0, z(z_idx{2}), x, x_int2, Egap, Vt, q); 
+%         n2 = 2*schOneValley(delta_E, 1001, 2, phi_new(:,z_idx{2}), 0.0, z(z_idx{2}), x, x_int2, Egap, Vt, q); 
+%         n3 = 2*schOneValley(delta_E, 1001, 3, phi_new(:,z_idx{2}), 0.0, z(z_idx{2}), x, x_int2, Egap, Vt, q); 
 
 
         nn_new(:,z_idx{2}) = n1 + n2 + n3;
@@ -124,17 +124,20 @@ for i = 1:1
 %         elapsedTime = toc
 %         return; 
 
-%         [ phi_new ] = nLinPoisson2D( 100, jbase, nn_new, ni, phi_new, boundary(:,:,1), doping, ...
+        [ phi_new, nn_new ] = nLinPoisson2D( 100, jbase, nn_new, ni, phi_new, boundary(:,:,1), doping, ...
+                              x, x_dlt, x_int, z, z_dlt, z_int, eps0, Vt, q);
+%         [ phi_new ] = nLinPoisson2D( 100, jbase, nn_new, ni, phi_new, boundary(:,:,1), Vgs(i), doping, ...
 %                               x_dlt, x_int, z_dlt, z_int, eps0, Vt, q);
-        [ phi_new ] = nLinPoisson2D( 100, jbase, nn_new, ni, phi_new, boundary(:,:,1), Vgs(i), doping, ...
-                              x_dlt, x_int, z_dlt, z_int, eps0, Vt, q);
-
+%         save test2;
         elapsedTime(i,j) = toc;
 %         disp(sprintf('Elapsed Time(sec): %03d \n', elapsedTime(i,j)));
         
         stop(i,j) = max(max(abs(phi_new-phi_old)));
         disp(sprintf('[%d]self-consist loop[%d]-error: %d \n', i, j, stop(i,j)));
         if (stop(i,j) < 1e-4) || (j == 100)
+            current = 2*currentOneValley( delta_E, 1001, 1, phi_new(:,z_idx{2}), Vds(i), z(z_idx{2}), x, x_int2, Egap, Vt, q ) + ...
+                      2*currentOneValley( delta_E, 1001, 2, phi_new(:,z_idx{2}), Vds(i), z(z_idx{2}), x, x_int2, Egap, Vt, q ) + ...
+                      2*currentOneValley( delta_E, 1001, 3, phi_new(:,z_idx{2}), Vds(i), z(z_idx{2}), x, x_int2, Egap, Vt, q );
             save(sprintf('result_%03d.mat',i));
             break;
         end

@@ -59,6 +59,8 @@ for i = 1:iterNum
     j = jbase*(eps0)*1e+9^2;
     J = j + diag( matrixToVector(h, nx, nz) );
     
+%     save('tt.mat');
+    
     
     %% #3. finding negative delta vector 
     invJ = inv(J);

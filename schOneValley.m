@@ -37,12 +37,12 @@ elseif valley == 2 % direction : y
     m_x = mt;
     m_y = ml;
     m_z = mt;
-    k_count = 5;
+    k_count = 2;
 elseif valley == 3  % direction : x
     m_x = ml;
     m_y = mt;
     m_z = mt;
-    k_count = 5;
+    k_count = 2;
 else 
     disp(sprintf('option : out of range!'));
     return;

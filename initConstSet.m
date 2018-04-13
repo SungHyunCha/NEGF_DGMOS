@@ -41,22 +41,25 @@ eps_r(:,z_idx{3}) = eps_r_ox;    % [1] in oxide.
 
 % constant setting : intrinsic carrier profile 
 ni(:, z_idx{1}) = 0;             % [m^-3] in oxide 
-ni(:, z_idx{2}(1)) = 0;          % interface
-ni(:, z_idx{2}(2:end-1)) = (ni0*1e+6);    % [m^-3] in semi.
-ni(:, z_idx{2}(end)) = 0;        % interface
+ni(:, z_idx{2}(1:end)) = (ni0*1e+6);    % [m^-3] in semi.
+% ni(:, z_idx{2}(1)) = 0;          % interface
+% ni(:, z_idx{2}(end)) = 0;        % interface
 ni(:, z_idx{3}) = 0;             % [m^-3] in oxide
 
 % constant setting : doping profile 
 doping(:, z_idx{1}) = 0;                % in oxide 
-doping(:, z_idx{2}(1)) = 0;             % interface 
-doping(x_idx{1},z_idx{2}(2:end-1)) = Nd(1)*1e+6;   % in semi. (n+)
-doping(x_idx{2},z_idx{2}(2:end-1)) = Nd(2)*1e+6;   % in semi. (i)
-doping(x_idx{3},z_idx{2}(2:end-1)) = Nd(3)*1e+6;   % in semi. (n+)
-doping(:, z_idx{2}(end)) = 0;           % interface 
+doping(x_idx{1},z_idx{2}(1:end)) = Nd(1)*1e+6;   % in semi. (n+)
+doping(x_idx{2},z_idx{2}(1:end)) = Nd(2)*1e+6;   % in semi. (i)
+doping(x_idx{3},z_idx{2}(1:end)) = Nd(3)*1e+6;   % in semi. (n+)
+% doping(:, z_idx{2}(1)) = 0;             % interface 
+% doping(:, z_idx{2}(end)) = 0;           % interface 
 doping(:, z_idx{3}) = 0;                % in oxide
+% 
+doping(x_int2(1),z_idx{2}(1:end)) = Nd(1)*1e+6;   % in semi. (n+)
+doping(x_int1(2),z_idx{2}(1:end)) = Nd(3)*1e+6;   % in semi. (n+)
 
-doping(x_idx{2}(1),z_idx{2}(2:end-1)) = Nd(1)*1e+6;   % in semi. (n+)
-doping(x_idx{2}(end),z_idx{2}(2:end-1)) = Nd(3)*1e+6;   % in semi. (n+)
+% doping(:,z_idx{2}(1)) = 2*doping(:,z_idx{2}(1));   % in semi. (n+)
+% doping(:,z_idx{2}(end)) = 2*doping(:,z_idx{2}(end));   % in semi. (n+)
 
 % doping(:,z_idx{2}(1)) = 0;
 % doping(:,z_idx{2}(end)) = 0;

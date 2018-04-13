@@ -11,7 +11,7 @@
 % csv_mob = csvread('emob_xcut_Vgs_0.6V_Vds_0.05V.csv',1,0,[1 0 z_nod 1]);
 
 %% phi plot
-ii = 29;    % 10, 29, 48
+ii = 10;    % 10, 29, 48
 
 nn = nn_new;
 phi = phi_new;

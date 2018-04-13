@@ -32,7 +32,7 @@ eps_x(:,z_int1) = bsxfun(@times, eps_r(:,z_int1), (z_dlt(z_int1-1)./(z_dlt(z_int
 % eps_x(:,z_int1(2)) = eps_r(:,z_int2(2));    % oxide 
 
 % eps_x(:,z_int1(1)) = eps_r(:,z_int2(1));    % silicon
-% eps_x(:,z_int1(2)) = eps_r(:,z_int1(2));    % silicon 
+% eps_x(:,z_int2(2)) = eps_r(:,z_int1(2));    % silicon 
 
             
 eps_left        = eps_x(2:end,:);
@@ -47,11 +47,16 @@ eps_right(1,:)      = eps_x(1,:)*2;
 eps_z = eps_r;
 eps_z(x_int1,:) = bsxfun(@times, eps_r(x_int1,:), x_dlt(x_int1-1)./(x_dlt(x_int1-1)+x_dlt(x_int2)) ) ...
                 + bsxfun(@times, eps_r(x_int2,:), x_dlt(x_int2)  ./(x_dlt(x_int1-1)+x_dlt(x_int2)) );
-            
+% eps_z(:,z_int2(1)) = eps_z(:,z_int1(1));       
 eps_lower        = eps_z(:,2:end);
 eps_lower(:,end) = eps_z(:,end)*2;
 
 % configue upper epsilon profile 
+% eps_z = eps_r;
+% eps_z(x_int1,:) = bsxfun(@times, eps_r(x_int1,:), x_dlt(x_int1-1)./(x_dlt(x_int1-1)+x_dlt(x_int2)) ) ...
+%                 + bsxfun(@times, eps_r(x_int2,:), x_dlt(x_int2)  ./(x_dlt(x_int1-1)+x_dlt(x_int2)) );
+%        
+% eps_z(:,z_int1(2)) = eps_z(:,z_int2(2));  
 eps_upper           = eps_z(:,1:end-1);
 eps_upper(:,z_int1) = eps_z(:,z_int2);  % z_int2 govern z-interface at upper case
 eps_upper(:,1)      = eps_z(:,1)*2;
@@ -134,24 +139,38 @@ for i = 1:nx
     for j = 1:size(z_int1,1)
         z1 = i+(z_int1(j)-1)*nx;
         z2 = i+(z_int2(j)-1)*nx;
-        jbase(z1,z2+nx) = jbase(z1,z2);
-        jbase(z1,z2   ) = 0;
+%         if j == 2
+            jbase(z1,z2+nx) = jbase(z1,z2);
+            jbase(z1,z2   ) = 0;
 
-        jbase(z2,:)  = 0;
-        jbase(z2,z2) = 1;
-        jbase(z2,z1) = -1;
+            jbase(z2,:)  = 0;
+            jbase(z2,z2) = 1;
+            jbase(z2,z1) = -1;
+%         elseif j == 1
+%             jbase(z2,z1-nx) = jbase(z2,z1);
+%             jbase(z2,z1   ) = 0;
+% 
+%             jbase(z1,:)  = 0;
+%             jbase(z1,z1) = 1;
+%             jbase(z1,z2) = -1;
+%         end 
     end 
 end
 
 % interface process (xz-intersection)
 for i = 1:size(x_int1,1)
    for j  = 1:size(z_int1,1)
-       xz1 = x_int1(i) + (z_int1(j)-1)*nx;
-       xz2 = x_int2(i) + (z_int2(j)-1)*nx;
-       
+%        if j == 2
+           xz1 = x_int1(i) + (z_int1(j)-1)*nx;
+           xz2 = x_int2(i) + (z_int2(j)-1)*nx;
+%        elseif j == 1
+%            xz1 = x_int1(i) + (z_int2(j)-1)*nx;
+%            xz2 = x_int2(i) + (z_int1(j)-1)*nx;
+%        end
        jbase(xz2, :) = 0;
        jbase(xz2, xz2) = 1; 
        jbase(xz2, xz1) = -1;
+
    end
 end
 
