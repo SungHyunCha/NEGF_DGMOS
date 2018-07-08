@@ -1,55 +1,75 @@
-  function [phi_new, nn_new]  = nLinPoisson2D(iterNum, jbase, nxz, ni, phi_new, boundary, doping, ...
-                    x, x_dlt, x_int, z, z_dlt, z_int, eps0, Vt, q)
-% function [phi] = nLinPoisson2D(iterNum, jbase, nxz, ni, phi, boundary, Vgs, doping, ...
-%                     x_dlt, x_int, z_dlt, z_int, eps0, Vt, q)
+function [phi, nn] = nLinPoisson2D(iterNum, jbase, phi, nxz, Vgs)
+%% 함수설명 : nonlinear Poisson 방정식을 해석합니다.
+% 각 파라미터는 다음과 같습니다. 
+% iterNum : 최대 iteration 횟수
+% jbase : Jacobian 행렬 (potential에 대한 정보만 포함)
+% phi : 포텐셜
+% nxz : 전자농도 - n(x,z)의미 
+% Vgs : gate전압 (초기값으로부터 상대적인 offset)
 
-% set index x-direction
-nx     = size(phi_new,1);
-x_int1 = x_int{1};
-x_int2 = x_int{2};
+%% 글로벌 변수로부터 상수를 불러옴
+global xmesh; % x방향 mesh 
+global zmesh; % z방향 mesh 
+global const_i; % 위치와 무관한 상수
+global const_p; % 위치에 따라 달라지는 상수 
 
-% set index z-direction
-nz     = size(phi_new,2);
-z_int1 = z_int{1};
-z_int2 = z_int{2};
+% x방향 인덱스, 간격 가져오기 
+x_int1 = xmesh.int1;    % 인덱스 (경계 왼쪽)
+x_int2 = xmesh.int2;    % 인덱스 (경계 오른쪽)
+x_dlt = xmesh.dlt;      % 노드 간격
 
-BC_index = find(boundary ~= 0);
+% z방향 인덱스, 간격 가져오기 
+z_int1 = zmesh.int1;    % 인덱스 (경계 왼쪽)
+z_int2 = zmesh.int2;    % 인덱스 (경계 왼쪽)
+z_dlt = zmesh.dlt;      % 노드 간격
 
-% ### Vgs sweep only ### 
-% boundary(BC_index) = boundary(BC_index) + Vgs;
+% 상수 불러오기 
+q = const_i.q;
+Vt = const_i.Vt;
+eps0 = const_i.eps0;    
+ni = const_p.ni;        % intrinsic concentration
+doping = const_p.doping;        % 도핑정보 
+boundary = const_p.boundary;    % 경계조건 정보
+BC_index = find(boundary ~= 0); % 경계조건에 해당하는 위치 index
+boundary(BC_index) = boundary(BC_index) + Vgs;  % 경계조건 값에 현재 Vgs를 조정
 
-oldphi = phi_new;
-
-% doping(:,z_int1) = 0;
-% doping(:,z_int2) = 0;
-
-% for test
+%% Newton iteration을 시작
+oldphi = phi;   % nxz에 대응하는 포텐셜 저장 (기준값)
 for i = 1:iterNum
-    %% #1. residual vector 
-    % calculating charge density 
-    nn_new = nxz.*exp(+(phi_new-oldphi)/Vt); 
-    pp_new = ni.*exp(-phi_new/Vt);
-    g  = q*(pp_new - nn_new + doping);  
-    g_log=g;
+    %% #1. residual vector 계산 
+    % charge term을 계산 ρ = q(p - n + Nd+)
+    nn = nxz.*exp(+(phi-oldphi)/Vt);    % 전자농도 (oldphi를 기준으로 변화한 포텐셜만큼 반영)
+    pp = ni.*exp(-phi/Vt);              % 홀농도
+    g  = q*(pp - nn + doping);          % charge 계산
     
-    % interface exception (:g)
+    % 서로 다른 두 물질 계면에서의 예외처리 (계면에서는 두 노드가 할당되어 있음) :
+    % <x축과 수직한 계면> (계면에 아주 가까운 왼쪽/오른쪽 두 노드가 할당되어있음)
+    % 왼쪽 노드: 다른 물질 계면에서 charge를 계산할 때 계면 왼쪽/오른쪽 노드의 charge를 노드 간격에 따라 가중합
+    % 오른쪽 노드: 0 (오른쪽 노드에서는 Poisson 방정식을 해석하지 않음. charge는 반드시 0)
+    % <z축과 수직한 계면> (계면에 아주 가까운 아래쪽/위쪽 두 노드가 할당되어있음)
+    % 아래쪽 노드: 다른 물질 계면에서 charge를 계산할 때 계면 아래쪽/위쪽 노드의 charge를 노드 간격에 따라 가중합
+    % 위쪽 노드: 0 (위쪽 노드에서는 Poisson 방정식을 해석하지 않음. charge는 반드시 0)
     g(x_int1,:) = bsxfun( @times, g(x_int1,:), x_dlt(x_int1-1)./(x_dlt(x_int1-1)+x_dlt(x_int1)) ) ...
-                + bsxfun( @times, g(x_int2,:), x_dlt(x_int1)  ./(x_dlt(x_int1-1)+x_dlt(x_int1)) );
+                + bsxfun( @times, g(x_int2,:), x_dlt(x_int1)  ./(x_dlt(x_int1-1)+x_dlt(x_int1)) ); %x방향
     g(:,z_int1) = bsxfun( @times, g(:,z_int1), (z_dlt(z_int1-1)./(z_dlt(z_int1-1)+z_dlt(z_int1)))' ) ...
-                + bsxfun( @times, g(:,z_int2), (z_dlt(z_int1)  ./(z_dlt(z_int1-1)+z_dlt(z_int1)))' );
+                + bsxfun( @times, g(:,z_int2), (z_dlt(z_int1)  ./(z_dlt(z_int1-1)+z_dlt(z_int1)))' ); %z방향
     g(x_int2,:) = 0;    
     g(:,z_int2) = 0;
     
-    % boundary exception 
+    % Dirichlet 경계 예외처리 (Poisson 방정식을 해석하지 않음. charge는 반드시 0)
     g(BC_index) = 0;
     
-    r = ( jbase*matrixToVector(phi_new, nx, nz) - matrixToVector(boundary, nx, nz) )...
-        *eps0*1e+9^2;
-    R = r + matrixToVector(g, nx, nz);
+    % 2차원으로 존재하는 행렬을 1차원 Residual vector로 변환 
+    % matrixToVector(행렬, x노드갯수, z노드갯수) : 2차원 행렬을 1차원 어레이로 변환하는 함수 
+    r = ( jbase*matrixToVector(phi, xmesh.nx, zmesh.nz) - matrixToVector(boundary, xmesh.nx, zmesh.nz) )...
+        *eps0*1e+9^2;              % 단위를 고려. (유전률, nm^-2)
+    R = r + matrixToVector(g, xmesh.nx, zmesh.nz);  % charge term을 더해 완전한 Residual 계산
 
-    %% #2. jacobian matrix 
-    h = -(q/Vt)*(pp_new + nn_new);
-    % interface exception (:h)
+    %% #2. Jacobian matrix 구성 
+    % potential에 대해 미분된 charge term을 계산
+    h = -(q/Vt)*(pp + nn);
+    
+    % 다른 물질 계면에서의 예외처리를 #1에서와 동일한 방법으로 처리 
     h(x_int1,:) = bsxfun( @times, h(x_int1,:), x_dlt(x_int1-1)./(x_dlt(x_int1-1)+x_dlt(x_int1)) ) ...
                 + bsxfun( @times, h(x_int2,:), x_dlt(x_int1)  ./(x_dlt(x_int1-1)+x_dlt(x_int1)) );
     h(:,z_int1) = bsxfun( @times, h(:,z_int1), (z_dlt(z_int1-1)./(z_dlt(z_int1-1)+z_dlt(z_int1)))' ) ...
@@ -57,28 +77,25 @@ for i = 1:iterNum
     h(x_int2,:) = 0;
     h(:,z_int2) = 0;
     
-    % boundary exception 
+    % Dirichlet 경계 예외처리
     h(BC_index) = 0;
     
-    j = jbase*(eps0)*1e+9^2;
-    J = j + diag( matrixToVector(h, nx, nz) );
+    j = jbase*(eps0)*1e+9^2;              % 단위를 고려. (유전률, nm^-2)
+    J = j + diag( matrixToVector(h, xmesh.nx, zmesh.nz) );  % 미분된 charge term을 더해 완전한 Jacobian 계산
     
-    %% #3. finding negative delta vector 
+    %% #3. 포텐셜 update 값을 계산 및 수렴성 체크 
+    % Jacobian*delta_phi = -Residual -> delta_phi =  -inverse(Jacobian)*Residual을 계산
     invJ = inv(J);
     dphi = -invJ*R;
-    dphiMat = vectorToMatrix(dphi,nx,nz);
+    dphiMat = vectorToMatrix(dphi, xmesh.nx, zmesh.nz); % 계산된 delta_phi를 1차원 어레이에서 2차원 행렬로 변환
     
-    phi_new = phi_new + dphiMat;
-    dphiVec = matrixToVector(dphiMat, nx, nz);
-    stop = full(max(abs(dphiVec)));
-%     stop_log1(i,1) = stop;
+    phi = phi + dphiMat;    % 업데이트를 반영 
+    dphiVec = matrixToVector(dphiMat, xmesh.nx, zmesh.nz);
+    stop = full(max(abs(dphiVec))); % update 값 중 최대값을 error로 간주하여 확인 
 
-    disp(sprintf('nonLinear Poisson trial[%d]-error: %d \n', i, stop))
-    if stop < 1e-12
-%         save nLinPoisson
+    if stop < 1e-12 % error가 기준값 1e-12보다 작으면 수렴판정하여 계산을 종료 
         break;
     end
 end
 
 end 
-% 

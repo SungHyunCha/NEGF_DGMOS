@@ -1,194 +1,191 @@
 clear;
+set(0,'defaultfigurecolor',[1 1 1]);
 
-%% sequence 
-% #0. Define basic information (mesh size / position / constant) 
-% #1. Solve 2D init Poisson eq.
-% #2. Repeat following loop
-%   #2-1. Solve Poisson eq, Current eq (electron, hole)
-%   #2-2. If error is larger than 1e-5, repeat #2. 
-% #3. Print result such as concentration, potential
+%% 시뮬레이션 수행 절차 
+% #0. 기본 정보를 정의 (메쉬 사이즈 / 위치 / 상수 정의) 
+% #1. 2D Poisson 방정식을 해석 (초기 potential 분포를 guess)
+% #2. 평형상태에서 다음 self consistent loop를 수행 
+%   #2-1. NEGF 해석 (입력: potential, 출력: 전자농도)
+%   #2-2. Poisson 방정식 해석 (입력: 전자농도, 출력: potential)
+%   #2-3. (#2-1, #2-2 실행 전후 potential 변화 최대값을 error로 정의) 
+%         i) error가 0.5e-5 보다 작으면 수렴으로 간주하여 #2-4로 이동
+%         ii) error가 0.5e-5 보다 크면 #2-1부터 다시 수행 
+%   #2-4. 수렴한 solution(potential)으로부터 전류를 계산, solution을 저장 
+% #3. 계산할 다음 bias point를 step만큼 조정하여 #2. 를 수행
 
-do_init = 0;
-
-if do_init == 1
-    %% model parameters 
-    Vg_bias = 0.6; 
-%     Vgate  = 0.533744;
-    Vgate  = 0.5050;
-    Vsource = 0.6113137; 
-    Vgs = Vgate + Vg_bias; 
-    Vss = Vsource;
-    Vds = Vsource;
+%% 초기 변수 설정 
+    clear -global;  % 기존 글로벌 변수를 모두 삭제 
+    %% bias 정의
+    Vg_bias = 0.1;  % Vgs [V]
+    % 금속 - workfunction: 4.1 eV 
+    % 실리콘 - electron affinity: 4.05 eV, bandgap: 1.11 eV
+    % barrier height = 4.1 - (4.05 + 1.11/2) = -0.505 eV -> 0.505 V
+    Vg_barrier  = 0.505; % [V]  
+    Vgs = Vg_barrier + Vg_bias; % 게이트 
     
-    Nd = [2e+20 ; 0 ; 2e+20]; 
+    Nd = [2e+20 ; 0 ; 2e+20]; % 도핑 농도 
 
-    %% position grid setting 
-    x = csvread('xmesh_0.5.csv', 1, 0, [1 0 57 0])*1e+3;   % node position [nm]
-    x_nod = size(x,1);
-    x_dlt = (x(2:end) - x(1:end-1));  % node spacing [nm]
-    x_int1 = find(x_dlt == 0);        % at least two interface 
-    x_int2 = x_int1 + 1;
-    x_int = {x_int1 x_int2};
+    %% (.csv) 파일로부터 위치 정보를 정의 
+    mesh_Generation();
 
-    x_idx = {1:x_int1(1)};            % cell notation 
-    for i = 2:size(x_int1,1)
-        x_idx{end+1} = x_int2(i-1):x_int1(i);
-    end
-    x_idx{end+1} = x_int2(i):x_nod;
-    x_idx{end+1} = x_nod;
-
-    z = csvread('zmesh_0.125.csv', 1, 0, [1 0 59 0])*1e+3;
-    z_nod = size(z,1);
-    z_dlt = (z(2:end) - z(1:end-1));
-%     z_dlt = round(z_dlt*1e+3)*1e-3;
-    z_int1 = find(z_dlt == 0);
-    z_int2 = z_int1 + 1;
-    z_int = {z_int1 z_int2};
-
-    z_idx = {1:z_int1(1)};
-    for i = 2:size(z_int1,1)
-        z_idx{end+1} = z_int2(i-1):z_int1(i);
-    end
-    z_idx{end+1} = z_int2(i):z_nod;
-    z_idx{end+1} = z_nod;
-
-    % delta setting at interface 
-    x_dlt(x_int1) = x_dlt(x_int2);
-    z_dlt(z_int1) = z_dlt(z_int2);
-
-    %% constant (position independent)
-    q = 1.602192e-19;       % [J/eV] or [C]
-    Vt = 1.380662e-23*300/q;% [V]
-    eps0 = 8.8542e-12;  	% [F/m]
-    Egap = 1.11;            % [eV] band gap
-
-    %% constant setting 
-    % Constant Setting (Poisson eq.)
-    % related with Poisson eq. 
-    eps_r      = zeros(x_nod,z_nod);   % relative permitivity (left, right, bottom, top)
-    ni         = zeros(x_nod,z_nod);     % intrinsic electron concentration 
-    doping     = zeros(x_nod,z_nod);     % doping concentration [m^-3]
-    boundary   = zeros(x_nod,z_nod,3);   % Dirichlet boundary (phi, n, p)
-    phi        = zeros(x_nod,z_nod);     % potential [V] 
-
-    % Constant Setting (2D continuity eq.)
-    nn = zeros(x_nod,z_nod);         % electron concentration [m^-3]
-    pp = zeros(x_nod,z_nod);         % hole     concentration [m^-3]
-    Dn = zeros(x_nod,z_nod,4);
-    Dp = zeros(x_nod,z_nod,4);
-    Dn0 = 1417e-4*Vt;       % electron diff. coefficient [m^2/sec]
-    Dp0 = 470.5e-4*Vt;      % hole     diff. coefficient [m^2/sec]
-
-    % Constant Setting 
-    [ eps_r, ni, doping, phi, boundary, nn, pp, Dn, Dp ] ...
-        = initConstSet( eps_r, ni, doping, phi, boundary, ...
-                        nn, pp, Dn, Dp, Dn0, Dp0, ...
-                        x_idx, x_int, x_dlt, z_idx, z_int, z_dlt, ...
-                        Nd, Vt, Vss, Vds, Vgs );
-        
-    %% initial Poisson eq. 
-    jbase = configueJbase(eps_r, boundary, x_idx, x_int, x_dlt, z_idx, z_int, z_dlt);
-% return;
-    [phi, nn, pp ] = initPoisson2D( 100, jbase, ni, phi, boundary(:,:,1), doping, ...
-                          x_dlt, x_int, z_dlt, z_int, eps0, Vt, q);
-    nn_new = nn; 
-    phi_new = phi;
-    save('init.mat');
+    %% 상수 설정 - 글로벌 상수로 저장
+    [ phi ] = initConstSet( Nd, Vgs );
+                    
+    %% Jacobian matrix 생성
+    jbase = configueJbase();
     return;
-else 
-    load('init.mat');
+
+    %% 초기 Poisson 방정식 정의
+    [ phi, nn  ] = initPoisson2D( 100, jbase, phi);
+    
+
+% ### variable explorer code ###
+%     phi = originVariable(1,1,phi);
+%     nn = originVariable(1,1,nn);
+%     global const_p
+%     doping = const_p.doping;
+%     doping = originVariable(1,1,doping);
+    
+%     global xmesh
+%     x = xmesh.node;
+%     global zmesh
+%     z = zmesh.node';
+    
+sweep_mode = 1; % 1: Vds sweep, 2: Vgs sweep
+if sweep_mode == 1
+    %% bias sweep 설정 (Vds)
+    bias = 0.5;     % 최종 bias 
+    nVds = 51;      % bias point 개수
+    Vds = linspace(0, bias, nVds);   % bias point 생성 
+    Ids = Vds*0;    % 전류값을 저장할 변수 (Vds와 길이가 같아야 함)
+    Vgs_delta = 0;  % Vgs를 sweep하지 않으므로 0
+else
+%     %% bias sweep 설정 (Vgs) - 이 기능을 위해서는 코드 수정이 필요 
+%     bias = 0.5;     % 
+%     nVgs = 51;      % 
+%     Vgs_delta = linspace(0, bias, nVgs);     % simulation target 
+%     Ids = Vgs_delta*0;  % 
+% %     Vds = 0;        % Vds를 sweep하지 않으므로 0
 end
-bias = 0.5;
-nVds = 51;   
-Vds = linspace(0, bias, nVds);     % simulation target 
-% bias = 0.6;
-% nVgs = 4;   
-% Vgs = linspace(0, bias, nVgs);     % simulation target 
 
-for i = 1:nVds
+%% self-consistent loop
+for i = 1:51
+    %% 해당 bias point에 대하여 미리 에너지 노드 설정과 각 노드에 대한 Fermi integral을 계산
+    deltaE = 0.25e-3;    % 에너지 노드 간격 
+
+    % valley 정보 : valley #1(l,t,t) #2(t,l,t) #3(t,t,l)
+    
+    % z방향 schrodinger 해석
+    [Em_t, Vm_t] = mode_Confinement( 1, phi);   % valley #1, #2
+    [Em_l, Vm_l] = mode_Confinement( 3, phi);   % valley #3
+
+    % E_l 에너지(longitudinal energy) 범위 설정 
+    E1 = min(min(Em_t(:,1)),min(Em_l(:,1)))-0.3;    % 시작점: Em 최소값보다 0.3 낮게 
+    E2 = max(max(Em_t(:,2)),max(Em_l(:,5)))+0.3;    % 끝점: Em 최대값보다 0.3 높게 
+    E1 = (round(E1/deltaE))*deltaE;     % 에너지 시작점을 deltaE 배수로 맞춤
+    E2 = (round(E2/deltaE))*deltaE;     % 에너지 끝점을 deltaE 배수로 맞춤
+    totalE = E1:deltaE:E2;  % 에너지 노드 생성
+
+    nodeNum = 1000; % Fermi integral에 사용되는 E_y 에너지 적분 노드 갯수 
+    % y방향 유효 질량 #2: m_y = m_l*m0, #1, #3: m_y = m_t*m0
+    FF1_t = configue_Ffunction( 1, nodeNum, 0, totalE);  % #1, #3 / source
+    FF2_t = configue_Ffunction( 1, nodeNum, Vds(i), totalE);  % #1, #3 / drain (bias)
+    FF1_l = configue_Ffunction( 2, nodeNum, 0, totalE);     % #2 / source
+    FF2_l = configue_Ffunction( 2, nodeNum, Vds(i), totalE);     % #2 / drain (bias)
+    
+    %% self-consistent loop 시작
     for j = 1:100
-        phi_old = phi_new;
-        % delta1, nodenum2, valley
+        phi_old = phi;
         tic;
-        delta_E = 0.1e-3;
-        n1 = 2*schOneValley(delta_E, 1001, 1, phi_new(:,z_idx{2}), Vds(i), z(z_idx{2}), x, x_int2, Egap, Vt, q); 
-        n2 = 2*schOneValley(delta_E, 1001, 2, phi_new(:,z_idx{2}), Vds(i), z(z_idx{2}), x, x_int2, Egap, Vt, q); 
-        n3 = 2*schOneValley(delta_E, 1001, 3, phi_new(:,z_idx{2}), Vds(i), z(z_idx{2}), x, x_int2, Egap, Vt, q); 
-%         n1 = 2*schOneValley(delta_E, 1001, 1, phi_new(:,z_idx{2}), 0.0, z(z_idx{2}), x, x_int2, Egap, Vt, q); 
-%         n2 = 2*schOneValley(delta_E, 1001, 2, phi_new(:,z_idx{2}), 0.0, z(z_idx{2}), x, x_int2, Egap, Vt, q); 
-%         n3 = 2*schOneValley(delta_E, 1001, 3, phi_new(:,z_idx{2}), 0.0, z(z_idx{2}), x, x_int2, Egap, Vt, q); 
-
-
-        nn_new(:,z_idx{2}) = n1 + n2 + n3;
-%         save('result.mat');
-%         elapsedTime = toc
-%         return; 
-
-        [ phi_new, nn_new ] = nLinPoisson2D( 100, jbase, nn_new, ni, phi_new, boundary(:,:,1), doping, ...
-                              x, x_dlt, x_int, z, z_dlt, z_int, eps0, Vt, q);
-%         [ phi_new ] = nLinPoisson2D( 100, jbase, nn_new, ni, phi_new, boundary(:,:,1), Vgs(i), doping, ...
-%                               x_dlt, x_int, z_dlt, z_int, eps0, Vt, q);
-%         save test2;
-        elapsedTime(i,j) = toc;
-%         disp(sprintf('Elapsed Time(sec): %03d \n', elapsedTime(i,j)));
+       %% NEGF 해석
+       % valley 정보 : #1(l,t,t) #2(t,l,t) #3(t,t,l)
+       % z방향 schrodinger 해석
+        [Em_t, Vm_t] = mode_Confinement( 1, phi);   % valley #1, #2 
+        [Em_l, Vm_l] = mode_Confinement( 3, phi);   % valley #3 
         
-        stop(i,j) = max(max(abs(phi_new-phi_old)));
+        nn1 = phi*0; nn2 = nn1; nn3 = nn1; % nn1, nn2, nn3 저장변수 생성 
+        for k = 1:2     % mode 갯수 2개 고려, 각 mode 에 대하여 계산되는 전자농도를 더함
+            % find_Ffunction: Em영역에 따라 사용할 Fermi 함수 범위와 Energy 범위를 찾음
+            % negf_Transport: NEGF를 해석하여 전자농도를 계산 (2곱하는 이유 - valley degeneracy)
+            % valley #1(l,t,t)
+            [E_v1, FF1_v1, FF2_v1] = find_Ffunction(Em_t, k, totalE, FF1_t, FF2_t); 
+            nn1 = nn1 + 2*negf_Transport(1, Em_t, Vm_t, k, E_v1, FF1_v1, FF2_v1);
+            % valley #2(t,l,t)
+            [E_v2, FF1_v2, FF2_v2] = find_Ffunction(Em_t, k, totalE, FF1_l, FF2_l);
+            nn2 = nn2 + 2*negf_Transport(2, Em_t, Vm_t, k, E_v2, FF1_v2, FF2_v2);            
+        end
+        for k = 1:5     % mode 갯수 5개 고려, 각 mode 에 대하여 계산되는 전자농도를 더함 
+            % valley #3(t,t,l)
+            [E_v3, FF1_v3, FF2_v3] = find_Ffunction(Em_l, k, totalE, FF1_t, FF2_t);
+            nn3 = nn3 + 2*negf_Transport(3, Em_l, Vm_l, k, E_v3, FF1_v3, FF2_v3);
+        end
+        nn = nn1 + nn2 + nn3;   % 각 valley별 계산된 전자농도를 더함 
+        
+        %% Poisson 방정식 해석 
+        % 최대 반복 횟수, jacobian 행렬, 포텐셜, 전자농도, Vgs변화값(기준은 초기 설정한 Vg_bias)
+        [ phi, nn ] = nLinPoisson2D( 100, jbase, phi, nn, Vgs_delta);
+
+        %% 수렴여부 체크하여 루프탈출여부 결정  
+        stop(i,j) = max(max(abs(phi - phi_old)));
         disp(sprintf('[%d]self-consist loop[%d]-error: %d \n', i, j, stop(i,j)));
-        if (stop(i,j) < 1e-4) || (j == 100)
-            current = 2*currentOneValley( delta_E, 1001, 1, phi_new(:,z_idx{2}), Vds(i), z(z_idx{2}), x, x_int2, Egap, Vt, q ) + ...
-                      2*currentOneValley( delta_E, 1001, 2, phi_new(:,z_idx{2}), Vds(i), z(z_idx{2}), x, x_int2, Egap, Vt, q ) + ...
-                      2*currentOneValley( delta_E, 1001, 3, phi_new(:,z_idx{2}), Vds(i), z(z_idx{2}), x, x_int2, Egap, Vt, q );
-            save(sprintf('result_%03d.mat',i));
+        if (stop(i,j) < 5e-4) || (j == 100)
             break;
         end
     end 
-end 
+    %% 루프를 탈출하면 전류를 계산 (수렴하기 전 계산하는 것은 계산력 낭비)
+    for k = 1:2     % mode 갯수 2개 고려, 각 mode 에 대하여 계산되는 전류값을 더함
+        % valley #1(l,t,t)
+        % negf_Current: NEGF를 해석하여 전류값을 계산 (2곱하는 이유 - valley degeneracy)
+        [E_v1, FF1_v1, FF2_v1] = find_Ffunction(Em_t, k, totalE, FF1_t, FF2_t);
+        Ids(i) = Ids(i) + 2*negf_Current(1, Em_t, k, E_v1, FF1_v1, FF2_v1);
+        % valley #2(t,l,t)        
+        [E_v2, FF1_v2, FF2_v2] = find_Ffunction(Em_t, k, totalE, FF1_l, FF2_l);
+        Ids(i) = Ids(i) + 2*negf_Current(2, Em_t, k, E_v2, FF1_v2, FF2_);
+    end
+    for k = 1:5     % mode 갯수 5개 고려, 각 mode 에 대하여 계산되는 전류값을 더함
+        % valley #3(t,t,l)
+        [E_v3, FF1_v3, FF2_v3] = find_Ffunction(Em_l, k, totalE, FF1_t, FF2_t);
+        Ids(i) = Ids(i) + 2*negf_Current(3, Em_l, k, E_v3, FF1_v3, FF2_v3);
+    end
     
-save('result.mat');
+    %% 결과 저장 
+    % 수렴된 결과를 각 bias point마다 저장. 
+    if (Vds(i) - floor(Vds(i)*10)/10 < 1e-10) %% 0 V, 0.1 V, 0.2 V, 0.3 V, 0.4 V, 0.5 V
+        % 0.1의 배수 point 마다 세부 계산 정보를 저장 
+        % - 공간을 많이 차지하므로 원치 않으면 save함수만 남기고 주석처리하세요
+        % 세부 계산 정보 : 각 valley, mode 별 spectral density A(x,E) (source/drain), 
+        %                 transmission coefficient T(E), current Ids(E)
+        % valley #1(l,t,t)
+        [ v1_1_A1, v1_1_A2, v1_1_T, v1_1_Ids ] = negf_ShowVariables( 1, Em_t, 1, totalE, FF1_t, FF2_t );
+        [ v1_2_A1, v1_2_A2, v1_2_T, v1_2_Ids ] = negf_ShowVariables( 1, Em_t, 2, totalE, FF1_t, FF2_t );
+        % valley #2(t,l,t)
+        [ v2_1_A1, v2_1_A2, v2_1_T, v2_1_Ids ] = negf_ShowVariables( 2, Em_t, 1, totalE, FF1_l, FF2_l );
+        [ v2_2_A1, v2_2_A2, v2_2_T, v2_2_Ids ] = negf_ShowVariables( 2, Em_t, 2, totalE, FF1_l, FF2_l );
+        % valley #3(t,t,l)
+        [ v3_1_A1, v3_1_A2, v3_1_T, v3_1_Ids ] = negf_ShowVariables( 3, Em_l, 1, totalE, FF1_t, FF2_t );
+        [ v3_2_A1, v3_2_A2, v3_2_T, v3_2_Ids ] = negf_ShowVariables( 3, Em_l, 2, totalE, FF1_t, FF2_t );
+        [ v3_3_A1, v3_3_A2, v3_3_T, v3_3_Ids ] = negf_ShowVariables( 3, Em_l, 3, totalE, FF1_t, FF2_t );
+        [ v3_4_A1, v3_4_A2, v3_4_T, v3_4_Ids ] = negf_ShowVariables( 3, Em_l, 4, totalE, FF1_t, FF2_t );
+        [ v3_5_A1, v3_5_A2, v3_5_T, v3_5_Ids ] = negf_ShowVariables( 3, Em_l, 5, totalE, FF1_t, FF2_t );
+        
+        save(sprintf('result (Vg = 0.1V)\\result_%03d.mat',i)); % 저장
+        % 저장 후 세부 정보 변수만 삭제 (메모리 점유율 낮추기 위함)
+        clear v1_1_A1 v1_1_A2 v1_1_T v1_1_Ids 
+        clear v1_2_A1 v1_2_A2 v1_2_T v1_2_Ids
+        clear v2_1_A1 v2_1_A2 v2_1_T v2_1_Ids
+        clear v2_2_A1 v2_2_A2 v2_2_T v2_2_Ids
+        clear v3_1_A1 v3_1_A2 v3_1_T v3_1_Ids
+        clear v3_2_A1 v3_2_A2 v3_2_T v3_2_Ids
+        clear v3_3_A1 v3_3_A2 v3_3_T v3_3_Ids
+        clear v3_4_A1 v3_4_A2 v3_4_T v3_4_Ids
+        clear v3_5_A1 v3_5_A2 v3_5_T v3_5_Ids
+    else % 수렴된 결과만 저장 
+        save(sprintf('result (Vg = 0.1V)\\result_%03d.mat',i)); % 저장
+    end
+end 
 
 return;
 
-nn = nn_new;
-phi = phi_new;
-
-ii = 26;
-% potential comparison plot 
-figure('Color', [1,1,1]); % z-slice
-plot(x, phi_new(:,ii), 'b'); hold on; plot(x, phi(:,ii), 'r');
-xlabel('Position (nm)'); ylabel('Potential (V)'); 
-title('Electric potential slice(x-direction) profile'); grid on;
-legend_h = legend('1mV 10step', '10mV 1step');
-set(legend_h,'Location','Best','FontSize',11);
-
-% error plot! 
-figure('Color', [1,1,1]); % z-slice
-plot(x, 100*abs( (phi_new(:,ii) - phi(:,ii) )./phi_new(:,ii) ), '--ro');
-xlabel('Position (nm)'); ylabel('Potential ratio (%)'); 
-title('Potential ratio profile'); grid on;
-legend_h = legend('abs((A-B)/A)');
-set(legend_h,'Location','Best','FontSize',11);
-% find maximum error! 
-max(100*abs( (phi_new(:,ii) - phi(:,ii) )./phi_new(:,ii)))
-
-ii = 26;
-% concentration comparison plot 
-figure('Color', [1,1,1]); % z-slice
-% plot(x, nn_new(:,ii)*1e-6, 'b'); hold on; plot(x, nn(:,ii)*1e-6, 'r');
-plot(x, nn_new(:,ii)/max(nn_new(:,ii)), 'b'); hold on; plot(x, nn(:,ii)/max(nn(:,ii)), 'r');
-xlabel('Position (nm)'); ylabel('Electron concentration (cm^-3)'); 
-title('Electron concentration profile'); grid on;
-legend_h = legend('1mV 10step', '10mV 1step');
-set(legend_h,'Location','Best','FontSize',11);
-
-% error plot! 
-figure('Color', [1,1,1]); % z-slice
-plot(x, 100*abs( (nn_new(:,ii) - nn(:,ii) )./nn_new(:,ii) ), '--ro');
-xlabel('Position (nm)'); ylabel('Electron concentration ratio (%)'); 
-title('Electron concentration ratio profile'); grid on;
-legend_h = legend('abs((A-B)/A)');
-set(legend_h,'Location','Best','FontSize',11);
-% find maximum error! 
-max(100*abs( (nn_new(:,ii) - nn(:,ii) )./nn_new(:,ii) ))
 
 
 
